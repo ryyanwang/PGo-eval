@@ -2,6 +2,7 @@ package dqueue
 
 import (
 	"fmt"
+
 	"github.com/UBC-NSS/pgo/distsys"
 	"github.com/UBC-NSS/pgo/distsys/tla"
 )
@@ -10,6 +11,23 @@ var _ = new(fmt.Stringer) // unconditionally prevent go compiler from reporting 
 var _ = distsys.ErrDone
 var _ = tla.Value{} // same, for tla
 
+// ONLY ONE PRODUCER (simialar to Producer/Consumer Paradigm in message queue/Kafka)
+// AProducer.requester: Reference to Consumer to send data over
+// - read:
+// - write:
+
+// AProducer.s: Channel/interface ot send data to the Producer
+// -read:
+// -write:
+
+// AProducer.net Networking interface for Producer (TODO)
+// -read:
+// -write:
+
+// MULTIPLE CONSUMERS
+//
+
+// iface is Archetype
 func NUM_NODES(iface distsys.ArchetypeInterface) tla.Value {
 	return tla.ModulePlusSymbol(iface.GetConstant("NUM_CONSUMERS")(), tla.MakeNumber(1))
 }
@@ -17,6 +35,8 @@ func NUM_NODES(iface distsys.ArchetypeInterface) tla.Value {
 var procTable = distsys.MakeMPCalProcTable()
 
 var jumpTable = distsys.MakeMPCalJumpTable(
+
+	// pendin state, waiting to move to AConsumer.c1
 	distsys.MPCalCriticalSection{
 		Name: "AConsumer.c",
 		Body: func(iface distsys.ArchetypeInterface) error {
@@ -30,31 +50,54 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			// no statements
 		},
 	},
+
+	// Requests data to procuer by sending your own identifier
 	distsys.MPCalCriticalSection{
 		Name: "AConsumer.c1",
 		Body: func(iface distsys.ArchetypeInterface) error {
+
+			// lock
+
+			// ask producr for value, block
+
+			// unlock
 			var err error
 			_ = err
 			net, err := iface.RequireArchetypeResourceRef("AConsumer.net")
 			if err != nil {
 				return err
 			}
+
+			// ASK PRODUCER FOR A THING
 			err = iface.Write(net, []tla.Value{iface.GetConstant("PRODUCER")()}, iface.Self())
 			if err != nil {
 				return err
 			}
+
 			return iface.Goto("AConsumer.c2")
 		},
 	},
+
+	// Proccesses one element read from the network
 	distsys.MPCalCriticalSection{
 		Name: "AConsumer.c2",
 		Body: func(iface distsys.ArchetypeInterface) error {
 			var err error
 			_ = err
+
+			// lock
+
+			// read from consumer
+
+			// write to output (us)
+			// go back to beginning of loop
+			// unlock
+
 			proc, err := iface.RequireArchetypeResourceRef("AConsumer.proc")
 			if err != nil {
 				return err
 			}
+
 			net0, err := iface.RequireArchetypeResourceRef("AConsumer.net")
 			if err != nil {
 				return err
@@ -64,10 +107,13 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			if err != nil {
 				return err
 			}
+
+			//
 			err = iface.Write(proc, nil, exprRead)
 			if err != nil {
 				return err
 			}
+
 			return iface.Goto("AConsumer.c")
 		},
 	},
@@ -77,6 +123,7 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			return distsys.ErrDone
 		},
 	},
+
 	distsys.MPCalCriticalSection{
 		Name: "AProducer.p",
 		Body: func(iface distsys.ArchetypeInterface) error {
@@ -90,6 +137,8 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			// no statements
 		},
 	},
+
+	// wait for consumer to request data
 	distsys.MPCalCriticalSection{
 		Name: "AProducer.p1",
 		Body: func(iface distsys.ArchetypeInterface) error {
@@ -101,10 +150,14 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 				return err
 			}
 			var exprRead0 tla.Value
+
+			// read from network.. ?
 			exprRead0, err = iface.Read(net1, []tla.Value{iface.Self()})
 			if err != nil {
 				return err
 			}
+
+			// write written value to requestor
 			err = iface.Write(requester, nil, exprRead0)
 			if err != nil {
 				return err
@@ -112,6 +165,8 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			return iface.Goto("AProducer.p2")
 		},
 	},
+
+	// sends some data to the requestee
 	distsys.MPCalCriticalSection{
 		Name: "AProducer.p2",
 		Body: func(iface distsys.ArchetypeInterface) error {
@@ -151,6 +206,7 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 	},
 )
 
+// consumer process
 var AConsumer = distsys.MPCalArchetype{
 	Name:              "AConsumer",
 	Label:             "AConsumer.c",
@@ -162,6 +218,7 @@ var AConsumer = distsys.MPCalArchetype{
 	},
 }
 
+// producer process
 var AProducer = distsys.MPCalArchetype{
 	Name:              "AProducer",
 	Label:             "AProducer.p",
@@ -170,6 +227,7 @@ var AProducer = distsys.MPCalArchetype{
 	JumpTable:         jumpTable,
 	ProcTable:         procTable,
 	PreAmble: func(iface distsys.ArchetypeInterface) {
+		// add list of requester archetype
 		iface.EnsureArchetypeResourceLocal("AProducer.requester", tla.Value{})
 	},
 }

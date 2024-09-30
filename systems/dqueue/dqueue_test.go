@@ -29,9 +29,10 @@ func TestProducerConsumer(t *testing.T) {
 	consumerOutputChannel := make(chan tla.Value, 3)
 
 	//traceRecorder := trace.MakeLocalFileRecorder("dqueue_trace.txt")
-
 	ctxProducer := distsys.NewMPCalContext(producerSelf, AProducer,
 		distsys.DefineConstantValue("PRODUCER", producerSelf),
+
+		// DEFINING PRODUCER NETWORK ARCHETYPE RESOURCE
 		distsys.EnsureArchetypeRefParam("net", resources.NewTCPMailboxes(func(index tla.Value) (resources.MailboxKind, string) {
 			switch index.AsNumber() {
 			case 0:
@@ -42,7 +43,11 @@ func TestProducerConsumer(t *testing.T) {
 				panic(fmt.Errorf("unknown mailbox index %v", index))
 			}
 		})),
+
+		// DEFINING PRODUCER INPUT ARCHETYPE RESOURCE
 		distsys.EnsureArchetypeRefParam("s", resources.NewInputChan(producerInputChannel)) /*, distsys.SetTraceRecorder(traceRecorder)*/)
+
+	// end ctx producer def
 	defer ctxProducer.Stop()
 	go func() {
 		err := ctxProducer.Run()
@@ -51,6 +56,7 @@ func TestProducerConsumer(t *testing.T) {
 		}
 	}()
 
+	// DEFINING CONSUMER NETOWRK ARCHETYPE RESOURCE
 	ctxConsumer := distsys.NewMPCalContext(consumerSelf, AConsumer,
 		distsys.DefineConstantValue("PRODUCER", producerSelf),
 		distsys.EnsureArchetypeRefParam("net", resources.NewTCPMailboxes(func(index tla.Value) (resources.MailboxKind, string) {
@@ -64,6 +70,7 @@ func TestProducerConsumer(t *testing.T) {
 			}
 		})),
 		distsys.EnsureArchetypeRefParam("proc", resources.NewOutputChan(consumerOutputChannel)) /*, distsys.SetTraceRecorder(traceRecorder)*/)
+	// end ctx consumer def
 	defer ctxConsumer.Stop()
 	go func() {
 		err := ctxConsumer.Run()
@@ -77,10 +84,15 @@ func TestProducerConsumer(t *testing.T) {
 		tla.MakeNumber(2),
 		tla.MakeNumber(3),
 	}
+
+	// PUTTING VALUES INTO INPUT CHANNEL
 	for _, value := range producedValues {
 		producerInputChannel <- value
 	}
 
+	// MAGIC HAPPENS HERE
+
+	// READING FROM CONSUMER OUTPUT CHANNEL
 	consumedValues := []tla.Value{<-consumerOutputChannel, <-consumerOutputChannel, <-consumerOutputChannel}
 	close(consumerOutputChannel)
 	time.Sleep(100 * time.Millisecond)
