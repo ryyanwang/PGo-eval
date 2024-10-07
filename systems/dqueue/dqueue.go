@@ -12,20 +12,28 @@ var _ = distsys.ErrDone
 var _ = tla.Value{} // same, for tla
 
 // ONLY ONE PRODUCER (simialar to Producer/Consumer Paradigm in message queue/Kafka)
-// AProducer.requester: Reference to Consumer to send data over
-// - read:
-// - write:
 
-// AProducer.s: Channel/interface ot send data to the Producer
-// -read:
-// -write:
+// AProducer.requester: Stores the ID of the consumer that requested data.
+// - read: In AProducer.p2, the producer reads the requester's ID from this resource.
+// - write: In AProducer.p1, the producer writes the requester's ID to this resource after receiving a request.
 
-// AProducer.net Networking interface for Producer (TODO)
-// -read:
-// -write:
+// AProducer.s: Input channel or interface from which the producer reads data to send to consumers.
+// - read: In AProducer.p2, the producer reads data from this resource to send to the requester.
+// - write: N/A (the producer does not write to 's'; it's an input resource).
+
+// AProducer.net: Networking interface for the producer to communicate with consumers.
+// - read: In AProducer.p1, the producer reads requests from consumers via net[self] (net[PRODUCER]).
+// - write: In AProducer.p2, the producer writes data to the requester via net[requester].
 
 // MULTIPLE CONSUMERS
-//
+
+// AConsumer.net: Networking interface for the consumer to communicate with the producer.
+// - read: In AConsumer.c2, the consumer reads data sent by the producer via net[self].
+// - write: In AConsumer.c1, the consumer sends a request to the producer by writing its own ID to net[PRODUCER].
+
+// AConsumer.proc: Output channel or interface where the consumer writes processed data.
+// - read: N/A (the consumer does not read from 'proc').
+// - write: In AConsumer.c2, the consumer writes the received data to 'proc'.
 
 // iface is Archetype
 func NUM_NODES(iface distsys.ArchetypeInterface) tla.Value {
@@ -56,11 +64,8 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 		Name: "AConsumer.c1",
 		Body: func(iface distsys.ArchetypeInterface) error {
 
-			// lock
-
 			// ask producr for value, block
 
-			// unlock
 			var err error
 			_ = err
 			net, err := iface.RequireArchetypeResourceRef("AConsumer.net")
@@ -68,7 +73,11 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 				return err
 			}
 
-			// ASK PRODUCER FOR A THING
+			// cusnet, err := iface.RequireArchetypeResourceRef("AConsumer.cusnet")
+
+			// cusnet.sendmsg(field1, field,2)
+
+			// consumer sends his own ID to the producer to request something
 			err = iface.Write(net, []tla.Value{iface.GetConstant("PRODUCER")()}, iface.Self())
 			if err != nil {
 				return err
@@ -138,25 +147,30 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 		},
 	},
 
-	// wait for consumer to request data
+	// wait for consumer to request data, then send ack
 	distsys.MPCalCriticalSection{
 		Name: "AProducer.p1",
 		Body: func(iface distsys.ArchetypeInterface) error {
 			var err error
 			_ = err
+
+			// get Requester resource
 			requester := iface.RequireArchetypeResource("AProducer.requester")
+
+			// get network interface
 			net1, err := iface.RequireArchetypeResourceRef("AProducer.net")
 			if err != nil {
 				return err
 			}
 			var exprRead0 tla.Value
 
-			// read from network.. ?
+			// read from own network TCP mailbox to get the
 			exprRead0, err = iface.Read(net1, []tla.Value{iface.Self()})
 			if err != nil {
 				return err
 			}
 
+			// send producer ID over network
 			// write written value to requestor
 			err = iface.Write(requester, nil, exprRead0)
 			if err != nil {
@@ -172,25 +186,37 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 		Body: func(iface distsys.ArchetypeInterface) error {
 			var err error
 			_ = err
+
+			// get network handle
 			net2, err := iface.RequireArchetypeResourceRef("AProducer.net")
 			if err != nil {
 				return err
 			}
+
+			// get requestor handle
 			requester0 := iface.RequireArchetypeResource("AProducer.requester")
+
+			// get data
 			s, err := iface.RequireArchetypeResourceRef("AProducer.s")
 			if err != nil {
 				return err
 			}
+
+			// read data
 			var exprRead1 tla.Value
 			exprRead1, err = iface.Read(s, nil)
 			if err != nil {
 				return err
 			}
+
+			// read requester value
 			var indexRead tla.Value
 			indexRead, err = iface.Read(requester0, nil)
 			if err != nil {
 				return err
 			}
+
+			// send data (expr1) over net2 to Requester []tla.value{indexRead}
 			err = iface.Write(net2, []tla.Value{indexRead}, exprRead1)
 			if err != nil {
 				return err
