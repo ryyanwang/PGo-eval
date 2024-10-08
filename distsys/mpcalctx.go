@@ -239,13 +239,13 @@ func DefineConstantValue(name string, value tla.Value) MPCalContextConfigFn {
 //
 // e.g:
 //
-//		CONSTANT IM_SPECIAL(_, _)
+//	CONSTANT IM_SPECIAL(_, _)
 //
 // The above example could be configured as such, if one wanted to approximate `IM_SPECIAL(a, b) == a + b`:
 //
-// 		DefineConstantOperator("IM_SPECIAL", func(a, b Value) Value {
-//      	return ModulePlusSymbol(a, b)
-//      })
+//			DefineConstantOperator("IM_SPECIAL", func(a, b Value) Value {
+//	     	return ModulePlusSymbol(a, b)
+//	     })
 //
 // Note that the type of defn is interface{} in order to accommodate variadic functions, with reflection being used
 // to determine the appropriate arity information. Any functions over Value, returning a single Value, are accepted.
@@ -253,11 +253,10 @@ func DefineConstantValue(name string, value tla.Value) MPCalContextConfigFn {
 //
 // Valid inputs include:
 //
-// 		func() Value { ... }
-// 		func(a, b, c, Value) Value { ... }
-// 		func(variadic... Value) Value { ... }
-//		func(a Value, variadic... Value) Value { ... }
-//
+//	func() Value { ... }
+//	func(a, b, c, Value) Value { ... }
+//	func(variadic... Value) Value { ... }
+//	func(a Value, variadic... Value) Value { ... }
 func DefineConstantOperator(name string, defn interface{}) MPCalContextConfigFn {
 	doubleDefnCheck := func(ctx *MPCalContext) {
 		if _, ok := ctx.constantDefns[name]; ok {
@@ -379,6 +378,13 @@ func (ctx *MPCalContext) getResourceByHandle(handle ArchetypeResourceHandle) Arc
 	return res
 }
 
+func (ctx *MPCalContext) GetResourceByHandle(handle ArchetypeResourceHandle) ArchetypeResource {
+	res, ok := ctx.resources[handle]
+	if !ok {
+		panic(fmt.Errorf("could not find resource with name %v", handle))
+	}
+	return res
+}
 func (ctx *MPCalContext) abort() {
 	var nonTrivialAborts []chan struct{}
 	for resHandle := range ctx.dirtyResourceHandles {

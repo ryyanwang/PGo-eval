@@ -65,23 +65,28 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 		Body: func(iface distsys.ArchetypeInterface) error {
 
 			// ask producr for value, block
-
 			var err error
-			_ = err
-			net, err := iface.RequireArchetypeResourceRef("AConsumer.net")
+			netref, err := iface.RequireArchetypeResourceRef("AConsumer.net")
 			if err != nil {
 				return err
 			}
+			// Use the getter method to access ctx
+			netResource := iface.Context().GetResourceByHandle(netref)
 
-			// cusnet, err := iface.RequireArchetypeResourceRef("AConsumer.cusnet")
+			// Perform type assertion to cast to CustomLocalTCPMailboxes
+			customMailboxes, ok := netResource.(*CustomLocalTCPMailboxes)
+			if !ok {
+				return fmt.Errorf("failed to cast netResource to CustomLocalTCPMailboxes")
+			}
 
-			// cusnet.sendmsg(field1, field,2)
+			// net, ok := net.(*CustomLocalTCPMailboxes)
 
 			// consumer sends his own ID to the producer to request something
-			err = iface.Write(net, []tla.Value{iface.GetConstant("PRODUCER")()}, iface.Self())
-			if err != nil {
-				return err
-			}
+			//           net =
+			// err = iface.Write(net, []tla.Value{iface.GetConstant("PRODUCER")()}, iface.Self())
+			// if err != nil {
+			// 	return err
+			// }
 
 			return iface.Goto("AConsumer.c2")
 		},

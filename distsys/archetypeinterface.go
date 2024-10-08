@@ -86,6 +86,10 @@ func (iface ArchetypeInterface) GetConstant(name string) func(args ...tla.Value)
 	return fn
 }
 
+func (iface *ArchetypeInterface) Context() *MPCalContext {
+	return iface.ctx
+}
+
 // RequireArchetypeResource returns a handle to the archetype resource with the given name. It panics if this resource
 // does not exist.
 func (iface ArchetypeInterface) RequireArchetypeResource(name string) ArchetypeResourceHandle {

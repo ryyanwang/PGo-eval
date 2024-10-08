@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -162,30 +161,20 @@ type CustomLocalTCPMailboxes struct {
 	// Listener for incoming connections
 	listener net.Listener
 
-	lock sync.RWMutex
-
 	// Channel to signal closure
 	done chan struct{}
 }
 
-func CustomNewLocalTCPMailboxes(listenAddr string, selfID int32, addresses map[int32]string) distsys.ArchetypeResource {
+func CustomNewLocalTCPMailboxes(listenAddr string) distsys.ArchetypeResource {
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		panic(fmt.Errorf("could not listen on address %s: %w", listenAddr, err))
 	}
-
 	res := &CustomLocalTCPMailboxes{
-		listenAddr:  listenAddr,
-		listener:    listener,
-		selfID:      selfID,
-		addresses:   addresses,
-		connections: make(map[int32]net.Conn),
-		done:        make(chan struct{}),
+		listener: listener,
 	}
-
-	// Start listening for incoming connections
+	// go listen tcp
 	go res.listen()
-
 	return res
 }
 
@@ -198,9 +187,9 @@ func (res *CustomLocalTCPMailboxes) connectTo(addr string) (net.Conn, error) {
 }
 
 func (res *CustomLocalTCPMailboxes) SendMessage(targetID int32, value tla.Value) error {
-	res.lock.RLock()
+	// res.lock.RLock()
 	conn, exists := res.connections[targetID]
-	res.lock.RUnlock()
+	// res.lock.RUnlock()
 
 	// If no connection exists, create a new one
 	if !exists {
@@ -292,7 +281,7 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 		}
 
 		// Process the received value.
-		res.lock.RLock()
+		// res.lock.RLock()
 		if !res.closing {
 			// Assuming you want to send an acknowledgment or process the value further.
 			err = encoder.Encode(struct{}{}) // This could be replaced with custom processing logic.
@@ -302,7 +291,7 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 				}
 			}
 		}
-		res.lock.RUnlock()
+		// res.lock.RUnlock()
 	}
 }
 
