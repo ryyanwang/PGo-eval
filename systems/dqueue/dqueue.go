@@ -74,7 +74,7 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			netResource := iface.Context().GetResourceByHandle(netref)
 
 			// Perform type assertion to cast to CustomLocalTCPMailboxes
-			customMailboxes, ok := netResource.(*CustomLocalTCPMailboxes)
+			_, ok := netResource.(*CustomLocalTCPMailboxes)
 			if !ok {
 				return fmt.Errorf("failed to cast netResource to CustomLocalTCPMailboxes")
 			}
