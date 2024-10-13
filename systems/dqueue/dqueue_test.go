@@ -111,16 +111,15 @@ func TestProducerConsumerNew(t *testing.T) {
 	producerSelf := tla.MakeNumber(0)
 	producerInputChannel := make(chan tla.Value, 3)
 
-	// consumerSelf := tla.MakeNumber(1)
-	// consumerOutputChannel := make(chan tla.Value, 3)
-	//traceRecorder := trace.MakeLocalFileRecorder("dqueue_trace.txt")
+	consumerSelf := tla.MakeNumber(1)
+	consumerOutputChannel := make(chan tla.Value, 3)
 	ctxProducer := distsys.NewMPCalContext(producerSelf, AProducer,
 		distsys.DefineConstantValue("PRODUCER", producerSelf),
-		distsys.EnsureArchetypeRefParam("net", CustomNewLocalTCPMailboxes("localhost:8001")),
-		distsys.EnsureArchetypeRefParam("s", resources.NewInputChan(producerInputChannel)))
+		distsys.EnsureArchetypeRefParam("netlocal", CustomNewLocalTCPMailboxes("localhost:8001")),
+		distsys.EnsureArchetypeRefParam("netremote", CustomNewRemoteTCPMailboxes("localhost:8002")),
+		distsys.EnsureArchetypeRefParam("s", NewDummyChannel(producerInputChannel)))
 
-	// ctxProducer := distsys.NewMPCalContext(producerSelf, AProducer, distsys.DefineConstantValue("PRODUCER", producerSelf), distsys.EnsureArchetypeRefParam("net", CustomNewTCPMailboxes()))
-	// end ctx producer def
+	
 	defer ctxProducer.Stop()
 	go func() {
 		err := ctxProducer.Run()
@@ -128,4 +127,42 @@ func TestProducerConsumerNew(t *testing.T) {
 			panic(err)
 		}
 	}()
+
+	ctxConsumer := distsys.NewMPCalContext(consumerSelf, AConsumer,
+		distsys.DefineConstantValue("PRODUCER", producerSelf),
+		distsys.EnsureArchetypeRefParam("netlocal", CustomNewLocalTCPMailboxes("localhost:8002")),
+		distsys.EnsureArchetypeRefParam("netremote", CustomNewRemoteTCPMailboxes("localhost:8001")),
+		distsys.EnsureArchetypeRefParam("proc", NewDummyChannel(consumerOutputChannel)))
+
+	producedValues := []tla.Value{
+		tla.MakeNumber(1),
+		tla.MakeNumber(2),
+		tla.MakeNumber(3),
+	}
+	defer ctxConsumer.Stop()
+	go func() {
+		err := ctxConsumer.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// PUTTING VALUES INTO INPUT CHANNEL
+	for _, value := range producedValues {
+		producerInputChannel <- value
+	}
+
+	consumedValues := []tla.Value{<-consumerOutputChannel, <-consumerOutputChannel, <-consumerOutputChannel}
+	close(consumerOutputChannel)
+	time.Sleep(100 * time.Millisecond)
+
+	if len(consumedValues) != len(producedValues) {
+		t.Fatalf("Consumed values %v did not match produced values %v", consumedValues, producedValues)
+	}
+	for i := range producedValues {
+		if !consumedValues[i].Equal(producedValues[i]) {
+			t.Fatalf("Consumed values %v did not match produced values %v", consumedValues, producedValues)
+		}
+	}
+
 }

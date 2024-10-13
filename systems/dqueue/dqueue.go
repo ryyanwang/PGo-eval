@@ -64,30 +64,13 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 		Name: "AConsumer.c1",
 		Body: func(iface distsys.ArchetypeInterface) error {
 
-			// ask producr for value, block
 			var err error
-			netref, err := iface.RequireArchetypeResourceRef("AConsumer.net")
+			netref, err := iface.RequireArchetypeResourceRef("AConsumer.netremote")
 			if err != nil {
 				return err
 			}
-			// Use the getter method to access ctx
-			netResource := iface.Context().GetResourceByHandle(netref)
-
-			// Perform type assertion to cast to CustomLocalTCPMailboxes
-			_, ok := netResource.(*CustomLocalTCPMailboxes)
-			if !ok {
-				return fmt.Errorf("failed to cast netResource to CustomLocalTCPMailboxes")
-			}
-
-			// net, ok := net.(*CustomLocalTCPMailboxes)
-
-			// consumer sends his own ID to the producer to request something
-			//           net =
-			// err = iface.Write(net, []tla.Value{iface.GetConstant("PRODUCER")()}, iface.Self())
-			// if err != nil {
-			// 	return err
-			// }
-
+			netResource := iface.Context().GetResourceByHandle(netref).(*CustomRemoteTCPMailboxes)
+			netResource.SendMessage(tla.MakeNumber(0))
 			return iface.Goto("AConsumer.c2")
 		},
 	},
@@ -99,34 +82,17 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			var err error
 			_ = err
 
-			// lock
+			procRef := iface.RequireArchetypeResource("AConsumer.proc")
+			proc := iface.Context().GetResourceByHandle(procRef).(*DummyChannel)
 
-			// read from consumer
+			localRef := iface.RequireArchetypeResource("AConsumer.net")
+			localMailbox := iface.Context().GetResourceByHandle(localRef).(*CustomLocalTCPMailboxes)
 
-			// write to output (us)
-			// go back to beginning of loop
-			// unlock
-
-			proc, err := iface.RequireArchetypeResourceRef("AConsumer.proc")
+			value, err := localMailbox.GetMessage()
 			if err != nil {
 				return err
 			}
-
-			net0, err := iface.RequireArchetypeResourceRef("AConsumer.net")
-			if err != nil {
-				return err
-			}
-			var exprRead tla.Value
-			exprRead, err = iface.Read(net0, []tla.Value{iface.Self()})
-			if err != nil {
-				return err
-			}
-
-			//
-			err = iface.Write(proc, nil, exprRead)
-			if err != nil {
-				return err
-			}
+			proc.channel <- value
 
 			return iface.Goto("AConsumer.c")
 		},
@@ -159,28 +125,12 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			var err error
 			_ = err
 
-			// get Requester resource
-			requester := iface.RequireArchetypeResource("AProducer.requester")
+			netref := iface.RequireArchetypeResource("AProducer.netlocal")
 
-			// get network interface
-			net1, err := iface.RequireArchetypeResourceRef("AProducer.net")
-			if err != nil {
-				return err
-			}
-			var exprRead0 tla.Value
+			net := iface.Context().GetResourceByHandle(netref).(*CustomLocalTCPMailboxes)
 
-			// read from own network TCP mailbox to get the
-			exprRead0, err = iface.Read(net1, []tla.Value{iface.Self()})
-			if err != nil {
-				return err
-			}
+			net.GetMessage()
 
-			// send producer ID over network
-			// write written value to requestor
-			err = iface.Write(requester, nil, exprRead0)
-			if err != nil {
-				return err
-			}
 			return iface.Goto("AProducer.p2")
 		},
 	},
@@ -192,40 +142,20 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			var err error
 			_ = err
 
-			// get network handle
-			net2, err := iface.RequireArchetypeResourceRef("AProducer.net")
+			sRef, err := iface.RequireArchetypeResourceRef("AProducer.s")
+			s := iface.Context().GetResourceByHandle(sRef).(*DummyChannel)
 			if err != nil {
 				return err
 			}
+			exprRead1 := <-s.channel
 
-			// get requestor handle
-			requester0 := iface.RequireArchetypeResource("AProducer.requester")
-
-			// get data
-			s, err := iface.RequireArchetypeResourceRef("AProducer.s")
+			netref, err := iface.RequireArchetypeResourceRef("AProducer.netremote")
 			if err != nil {
 				return err
 			}
+			net := iface.Context().GetResourceByHandle(netref).(*CustomRemoteTCPMailboxes)
 
-			// read data
-			var exprRead1 tla.Value
-			exprRead1, err = iface.Read(s, nil)
-			if err != nil {
-				return err
-			}
-
-			// read requester value
-			var indexRead tla.Value
-			indexRead, err = iface.Read(requester0, nil)
-			if err != nil {
-				return err
-			}
-
-			// send data (expr1) over net2 to Requester []tla.value{indexRead}
-			err = iface.Write(net2, []tla.Value{indexRead}, exprRead1)
-			if err != nil {
-				return err
-			}
+			net.SendMessage(exprRead1)
 			return iface.Goto("AProducer.p")
 		},
 	},
@@ -241,7 +171,7 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 var AConsumer = distsys.MPCalArchetype{
 	Name:              "AConsumer",
 	Label:             "AConsumer.c",
-	RequiredRefParams: []string{"AConsumer.net", "AConsumer.proc"},
+	RequiredRefParams: []string{"AConsumer.netlocal", "AConsumer.proc", "AConsumer.netremote"},
 	RequiredValParams: []string{},
 	JumpTable:         jumpTable,
 	ProcTable:         procTable,
@@ -253,7 +183,7 @@ var AConsumer = distsys.MPCalArchetype{
 var AProducer = distsys.MPCalArchetype{
 	Name:              "AProducer",
 	Label:             "AProducer.p",
-	RequiredRefParams: []string{"AProducer.net", "AProducer.s"},
+	RequiredRefParams: []string{"AProducer.netlocal", "AProducer.netremote", "AProducer.s"},
 	RequiredValParams: []string{},
 	JumpTable:         jumpTable,
 	ProcTable:         procTable,
