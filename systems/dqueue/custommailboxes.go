@@ -43,41 +43,46 @@ type CustomLocalTCPMailboxes struct {
 }
 
 func CustomNewLocalTCPMailboxes(listenAddr string) *CustomLocalTCPMailboxes {
+	log.Printf("Starting CustomLocalTCPMailboxes with address: %s", listenAddr)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		panic(fmt.Errorf("could not listen on address %s: %w", listenAddr, err))
 	}
 	res := &CustomLocalTCPMailboxes{
-		listener: listener,
-		done:     make(chan struct{}),
-		// Initialize the buffer
+		listener:      listener,
+		done:          make(chan struct{}),
 		messageBuffer: make([]tla.Value, 0),
-		// Initialize the maps
-		connections: make(map[int32]net.Conn),
-		addresses:   make(map[int32]string),
+		connections:   make(map[int32]net.Conn),
+		addresses:     make(map[int32]string),
 	}
 	// Start listening for incoming connections
 	go res.listen()
 	return res
 }
+
 func (res *CustomLocalTCPMailboxes) Index(tla.Value) (distsys.ArchetypeResource, error) {
 	return nil, nil
 }
+
 func (res *CustomLocalTCPMailboxes) VClockHint(vclock trace.VClock) trace.VClock {
 	return trace.VClock{}
 }
 
 func (res *CustomLocalTCPMailboxes) listen() {
+	log.Printf("Listening for connections on %s", res.listenAddr)
 	for {
 		conn, err := res.listener.Accept()
 		if err != nil {
 			select {
 			case <-res.done:
+				log.Printf("Listener closed, exiting listen loop")
 				return
 			default:
-				panic(fmt.Errorf("error listening on %s: %w", res.listenAddr, err))
+				log.Printf("Error accepting connection on %s: %v", res.listenAddr, err)
+				continue
 			}
 		}
+		log.Printf("Accepted connection from %s", conn.RemoteAddr())
 		go res.handleConn(conn)
 	}
 }
@@ -87,27 +92,16 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 	defer func() {
 		err := conn.Close()
 		if err != nil {
-			log.Printf("error closing connection: %v", err)
+			log.Printf("Error closing connection: %v", err)
 		}
+		log.Printf("Closed connection with %s", conn.RemoteAddr())
 	}()
 
 	decoder := gob.NewDecoder(conn)
+	log.Printf("Started handling connection from %s", conn.RemoteAddr())
 	var err error
 
 	for {
-		// Handle network error or EOF
-		if err != nil {
-			select {
-			case <-res.done:
-				return
-			default:
-				if err != io.EOF {
-					log.Printf("network error during handleConn, dropping connection: %s", err)
-				}
-			}
-			return
-		}
-
 		var value tla.Value
 		errCh := make(chan error)
 
@@ -119,24 +113,33 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 		select {
 		case err = <-errCh:
 		case <-res.done:
+			log.Printf("Received done signal, stopping handleConn for %s", conn.RemoteAddr())
 			return
 		}
 
 		if err != nil {
-			continue
+			if err == io.EOF {
+				log.Printf("Connection closed by peer: %s", conn.RemoteAddr())
+			} else {
+				log.Printf("Error decoding message from %s: %v", conn.RemoteAddr(), err)
+			}
+			return
 		}
+
+		// Log the received message
+		log.Printf("Received message from %s: %v", conn.RemoteAddr(), value)
 
 		// Add the received value to the buffer
 		res.bufferMutex.Lock()
 		res.messageBuffer = append(res.messageBuffer, value)
+		log.Printf("Added message to buffer, buffer size: %d", len(res.messageBuffer))
 		res.bufferMutex.Unlock()
-
-		// Further message processing can be added here if needed
 	}
 }
 
 // GetMessage returns the first item from the buffer (queue)
 func (res *CustomLocalTCPMailboxes) GetMessage() (tla.Value, error) {
+	log.Printf("GetMessage called, checking buffer...")
 	for {
 		res.bufferMutex.Lock()
 
@@ -145,13 +148,15 @@ func (res *CustomLocalTCPMailboxes) GetMessage() (tla.Value, error) {
 			message := res.messageBuffer[0]
 			res.messageBuffer = res.messageBuffer[1:]
 
+			log.Printf("Message retrieved from buffer: %v, remaining buffer size: %d", message, len(res.messageBuffer))
 			res.bufferMutex.Unlock()
 			return message, nil
 		}
 
 		res.bufferMutex.Unlock()
 
-		// Sleep for a short duration before checking again (polling)
+		// Log that buffer is empty, retrying after sleep
+		log.Printf("Buffer empty, sleeping for 500ms")
 		time.Sleep(500 * time.Millisecond)
 	}
 }
@@ -169,6 +174,7 @@ func (res *CustomLocalTCPMailboxes) Commit() chan struct{} {
 }
 
 func (res *CustomLocalTCPMailboxes) ReadValue() (tla.Value, error) {
+	panic("Panic!?")
 	return tla.Value{}, fmt.Errorf("ReadValue is not supported in CustomTCPMailboxes")
 }
 
@@ -177,6 +183,8 @@ func (res *CustomLocalTCPMailboxes) WriteValue(value tla.Value) error {
 }
 
 func (res *CustomLocalTCPMailboxes) Close() error {
+	log.Printf("Closing TCP mailboxes on %s", res.listenAddr)
+	close(res.done)
 	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
 }
 
@@ -195,24 +203,26 @@ type CustomRemoteTCPMailboxes struct {
 
 // CustomNewRemoteTCPMailboxes initializes the remote TCP mailbox with a single address
 func CustomNewRemoteTCPMailboxes(remoteAddress string) *CustomRemoteTCPMailboxes {
-	// Initialize the mailbox
+	log.Printf("Starting CustomRemoteTCPMailboxes to connect to %s", remoteAddress)
 	res := &CustomRemoteTCPMailboxes{
 		remoteAddress: remoteAddress,
 		done:          make(chan struct{}),
 	}
-
 	return res
 }
 
 // Establishes a connection to the remote address
 func (res *CustomRemoteTCPMailboxes) establishConnection() error {
+	log.Printf("Attempting to connect to %s", res.remoteAddress)
 	conn, err := net.Dial("tcp", res.remoteAddress)
 	if err != nil {
+		log.Printf("Failed to connect to %s: %v", res.remoteAddress, err)
 		return fmt.Errorf("failed to connect to %s: %w", res.remoteAddress, err)
 	}
 
 	// Store the connection
 	res.connection = conn
+	log.Printf("Connection established to %s", res.remoteAddress)
 	return nil
 }
 
@@ -226,11 +236,13 @@ func (res *CustomRemoteTCPMailboxes) SendMessage(value tla.Value) error {
 
 	// Send the message using gob encoder
 	encoder := gob.NewEncoder(res.connection)
-	err = encoder.Encode(value)
+	err = encoder.Encode(&value)
 	if err != nil {
+		log.Printf("Failed to send message to %s: %v", res.remoteAddress, err)
 		return fmt.Errorf("failed to send message to %s: %w", res.remoteAddress, err)
 	}
 
+	log.Printf("Message sent to %s: %v", res.remoteAddress, value)
 	return nil
 }
 
@@ -240,8 +252,10 @@ func (res *CustomRemoteTCPMailboxes) CloseConn() error {
 	if res.connection != nil {
 		err := res.connection.Close()
 		if err != nil {
+			log.Printf("Error closing connection to %s: %v", res.remoteAddress, err)
 			return fmt.Errorf("error closing connection: %w", err)
 		}
+		log.Printf("Connection closed to %s", res.remoteAddress)
 	}
 	return nil
 }
@@ -259,6 +273,7 @@ func (res *CustomRemoteTCPMailboxes) Commit() chan struct{} {
 }
 
 func (res *CustomRemoteTCPMailboxes) ReadValue() (tla.Value, error) {
+	panic("Panic!?")
 	return tla.Value{}, fmt.Errorf("ReadValue is not supported in CustomTCPMailboxes")
 }
 

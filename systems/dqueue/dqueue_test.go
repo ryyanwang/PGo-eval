@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/UBC-NSS/pgo/distsys/tla"
+	"log"
 
 	"github.com/UBC-NSS/pgo/distsys"
 	"github.com/UBC-NSS/pgo/distsys/resources"
+	"github.com/UBC-NSS/pgo/distsys/tla"
 )
 
 func TestNUM_NODES(t *testing.T) {
@@ -108,61 +109,83 @@ func TestProducerConsumer(t *testing.T) {
 	}
 }
 func TestProducerConsumerNew(t *testing.T) {
+	log.Println("Starting TestProducerConsumerNew")
+
+	// Initialize producer
 	producerSelf := tla.MakeNumber(0)
 	producerInputChannel := make(chan tla.Value, 3)
 
+	// Initialize consumer
 	consumerSelf := tla.MakeNumber(1)
 	consumerOutputChannel := make(chan tla.Value, 3)
+
+	log.Println("Initializing producer context")
 	ctxProducer := distsys.NewMPCalContext(producerSelf, AProducer,
 		distsys.DefineConstantValue("PRODUCER", producerSelf),
 		distsys.EnsureArchetypeRefParam("netlocal", CustomNewLocalTCPMailboxes("localhost:8001")),
 		distsys.EnsureArchetypeRefParam("netremote", CustomNewRemoteTCPMailboxes("localhost:8002")),
 		distsys.EnsureArchetypeRefParam("s", NewDummyChannel(producerInputChannel)))
 
-	
 	defer ctxProducer.Stop()
 	go func() {
 		err := ctxProducer.Run()
 		if err != nil {
-			panic(err)
+			log.Fatalf("Producer context run failed: %v", err)
 		}
+		log.Println("Producer context stopped")
 	}()
 
+	log.Println("Initializing consumer context")
 	ctxConsumer := distsys.NewMPCalContext(consumerSelf, AConsumer,
 		distsys.DefineConstantValue("PRODUCER", producerSelf),
 		distsys.EnsureArchetypeRefParam("netlocal", CustomNewLocalTCPMailboxes("localhost:8002")),
 		distsys.EnsureArchetypeRefParam("netremote", CustomNewRemoteTCPMailboxes("localhost:8001")),
 		distsys.EnsureArchetypeRefParam("proc", NewDummyChannel(consumerOutputChannel)))
 
+	defer ctxConsumer.Stop()
+	go func() {
+		err := ctxConsumer.Run()
+		if err != nil {
+			log.Fatalf("Consumer context run failed: %v", err)
+		}
+		log.Println("Consumer context stopped")
+	}()
+
+	// Define produced values
 	producedValues := []tla.Value{
 		tla.MakeNumber(1),
 		tla.MakeNumber(2),
 		tla.MakeNumber(3),
 	}
-	defer ctxConsumer.Stop()
-	go func() {
-		err := ctxConsumer.Run()
-		if err != nil {
-			panic(err)
-		}
-	}()
 
-	// PUTTING VALUES INTO INPUT CHANNEL
+	log.Printf("Sending values to producer input channel: %v", producedValues)
+	// Send values to the producer's input channel
 	for _, value := range producedValues {
+		log.Printf("Sending value: %v", value)
 		producerInputChannel <- value
 	}
 
+	// Retrieve consumed values from the consumer output channel
+	log.Println("Receiving values from consumer output channel")
 	consumedValues := []tla.Value{<-consumerOutputChannel, <-consumerOutputChannel, <-consumerOutputChannel}
 	close(consumerOutputChannel)
+
+	// Allow time for processing
 	time.Sleep(100 * time.Millisecond)
 
+	// Compare produced and consumed values
 	if len(consumedValues) != len(producedValues) {
 		t.Fatalf("Consumed values %v did not match produced values %v", consumedValues, producedValues)
 	}
 	for i := range producedValues {
 		if !consumedValues[i].Equal(producedValues[i]) {
-			t.Fatalf("Consumed values %v did not match produced values %v", consumedValues, producedValues)
+			t.Fatalf("Consumed value %v did not match produced value %v", consumedValues[i], producedValues[i])
 		}
 	}
 
+	log.Printf("TestProducerConsumerNew completed successfully. Produced: %v, Consumed: %v", producedValues, consumedValues)
+	ctxProducer.CleanupResources()
+	ctxProducer.Stop()
+	ctxConsumer.CleanupResources()
+	ctxConsumer.Stop()
 }
