@@ -516,7 +516,7 @@ func (ctx *MPCalContext) Run() (err error) {
 	// clean up all our resources and notify any interested parties that we have terminated.
 	defer func() {
 		// do clean-up, merging any errors into the error we return
-		err = multierr.Append(err, ctx.CleanupResources())
+		err = multierr.Append(err, ctx.cleanupResources())
 		// report the error to the tracer before dying, since this might be more useful than a truncated trace
 		if err != nil {
 			ctx.eventState.CrashEvent(err)
@@ -621,7 +621,7 @@ func (ctx *MPCalContext) Stop() {
 	<-ctx.awaitExit
 }
 
-func (ctx *MPCalContext) CleanupResources() (err error) {
+func (ctx *MPCalContext) cleanupResources() (err error) {
 	// Note that we should close all the resources, not just the dirty ones.
 	for _, res := range ctx.resources {
 		cerr := res.Close()

@@ -6,8 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
-	"time"
+	"strings"
 
 	"github.com/UBC-NSS/pgo/distsys"
 	"github.com/UBC-NSS/pgo/distsys/tla"
@@ -36,10 +35,7 @@ type CustomLocalTCPMailboxes struct {
 	done chan struct{}
 
 	// Buffer to store received messages (acting like a queue)
-	messageBuffer []tla.Value
-
-	// Mutex to protect concurrent access to the message buffer
-	bufferMutex sync.Mutex
+	messageChan chan tla.Value
 }
 
 func CustomNewLocalTCPMailboxes(listenAddr string) *CustomLocalTCPMailboxes {
@@ -49,11 +45,11 @@ func CustomNewLocalTCPMailboxes(listenAddr string) *CustomLocalTCPMailboxes {
 		panic(fmt.Errorf("could not listen on address %s: %w", listenAddr, err))
 	}
 	res := &CustomLocalTCPMailboxes{
-		listener:      listener,
-		done:          make(chan struct{}),
-		messageBuffer: make([]tla.Value, 0),
-		connections:   make(map[int32]net.Conn),
-		addresses:     make(map[int32]string),
+		listener:    listener,
+		done:        make(chan struct{}),
+		messageChan: make(chan tla.Value, 100),
+		connections: make(map[int32]net.Conn),
+		addresses:   make(map[int32]string),
 	}
 	// Start listening for incoming connections
 	go res.listen()
@@ -89,37 +85,25 @@ func (res *CustomLocalTCPMailboxes) listen() {
 
 // handle incoming connection
 func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			log.Printf("Error closing connection: %v", err)
-		}
-		log.Printf("Closed connection with %s", conn.RemoteAddr())
-	}()
-
 	decoder := gob.NewDecoder(conn)
 	log.Printf("Started handling connection from %s", conn.RemoteAddr())
-	var err error
+
+	// Start a goroutine to close conn when res.done is closed
+	go func() {
+		<-res.done
+		log.Printf("Received done signal, closing connection for %s", conn.RemoteAddr())
+		conn.Close()
+	}()
 
 	for {
 		var value tla.Value
-		errCh := make(chan error)
 
-		// Decode the incoming message in a separate goroutine to handle possible blocking.
-		go func() {
-			errCh <- decoder.Decode(&value)
-		}()
-
-		select {
-		case err = <-errCh:
-		case <-res.done:
-			log.Printf("Received done signal, stopping handleConn for %s", conn.RemoteAddr())
-			return
-		}
-
+		err := decoder.Decode(&value)
 		if err != nil {
 			if err == io.EOF {
 				log.Printf("Connection closed by peer: %s", conn.RemoteAddr())
+			} else if strings.Contains(err.Error(), "use of closed network connection") {
+				log.Printf("Connection closed by us for %s", conn.RemoteAddr())
 			} else {
 				log.Printf("Error decoding message from %s: %v", conn.RemoteAddr(), err)
 			}
@@ -129,35 +113,30 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 		// Log the received message
 		log.Printf("Received message from %s: %v", conn.RemoteAddr(), value)
 
-		// Add the received value to the buffer
-		res.bufferMutex.Lock()
-		res.messageBuffer = append(res.messageBuffer, value)
-		log.Printf("Added message to buffer, buffer size: %d", len(res.messageBuffer))
-		res.bufferMutex.Unlock()
+		// Send the received value into the channel
+		select {
+		case res.messageChan <- value:
+			log.Printf("Message sent to messageChan")
+		case <-res.done:
+			log.Printf("Received done signal, stopping handleConn for %s", conn.RemoteAddr())
+			return
+		}
 	}
 }
 
 // GetMessage returns the first item from the buffer (queue)
+// GetMessage returns the next message from the channel
 func (res *CustomLocalTCPMailboxes) GetMessage() (tla.Value, error) {
-	log.Printf("GetMessage called, checking buffer...")
-	for {
-		res.bufferMutex.Lock()
-
-		if len(res.messageBuffer) > 0 {
-			// Retrieve and remove the first item in the buffer (queue-like behavior)
-			message := res.messageBuffer[0]
-			res.messageBuffer = res.messageBuffer[1:]
-
-			log.Printf("Message retrieved from buffer: %v, remaining buffer size: %d", message, len(res.messageBuffer))
-			res.bufferMutex.Unlock()
-			return message, nil
+	log.Printf("GetMessage called, waiting for message...")
+	select {
+	case message, ok := <-res.messageChan:
+		if !ok {
+			return tla.Value{}, fmt.Errorf("message channel closed")
 		}
-
-		res.bufferMutex.Unlock()
-
-		// Log that buffer is empty, retrying after sleep
-		log.Printf("Buffer empty, sleeping for 500ms")
-		time.Sleep(500 * time.Millisecond)
+		log.Printf("Message retrieved from channel: %v", message)
+		return message, nil
+	case <-res.done:
+		return tla.Value{}, fmt.Errorf("mailbox closed")
 	}
 }
 
@@ -182,10 +161,21 @@ func (res *CustomLocalTCPMailboxes) WriteValue(value tla.Value) error {
 	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
 }
 
+// Close gracefully shuts down the mailbox
 func (res *CustomLocalTCPMailboxes) Close() error {
 	log.Printf("Closing TCP mailboxes on %s", res.listenAddr)
+	// First, close res.done to signal goroutines to exit
 	close(res.done)
-	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
+	// Then, close the listener
+	err := res.listener.Close()
+	if err != nil {
+		log.Printf("Error closing listener: %v", err)
+		return err
+	}
+	// Close the message channel after all goroutines have exited
+	close(res.messageChan)
+	log.Printf("CustomLocalTCPMailboxes closed")
+	return nil
 }
 
 type CustomRemoteTCPMailboxes struct {
@@ -248,7 +238,6 @@ func (res *CustomRemoteTCPMailboxes) SendMessage(value tla.Value) error {
 
 // Close closes the active connection and signals completion
 func (res *CustomRemoteTCPMailboxes) CloseConn() error {
-	close(res.done)
 	if res.connection != nil {
 		err := res.connection.Close()
 		if err != nil {
@@ -281,7 +270,11 @@ func (res *CustomRemoteTCPMailboxes) WriteValue(value tla.Value) error {
 	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
 }
 func (res *CustomRemoteTCPMailboxes) Close() error {
-	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
+	log.Printf("Closing Remote TCP")
+
+	res.CloseConn()
+	close(res.done)
+	return nil
 }
 
 type DummyChannel struct {
@@ -323,7 +316,8 @@ func (res *DummyChannel) Commit() chan struct{} {
 }
 
 func (res *DummyChannel) Close() error {
-	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
+	close(res.channel)
+	return nil
 }
 func (res *DummyChannel) Index(value tla.Value) (distsys.ArchetypeResource, error) {
 	return nil, fmt.Errorf("Index method is not supported in DummyChannel")

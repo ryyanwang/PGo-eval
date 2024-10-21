@@ -184,8 +184,6 @@ func TestProducerConsumerNew(t *testing.T) {
 	}
 
 	log.Printf("TestProducerConsumerNew completed successfully. Produced: %v, Consumed: %v", producedValues, consumedValues)
-	ctxProducer.CleanupResources()
 	ctxProducer.Stop()
-	ctxConsumer.CleanupResources()
 	ctxConsumer.Stop()
 }
