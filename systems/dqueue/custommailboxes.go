@@ -24,10 +24,7 @@ type CustomLocalTCPMailboxes struct {
 	connections map[int32]net.Conn
 
 	listenAddr string
-	// Self ID
-	selfID int32
 
-	closing bool
 	// Listener for incoming connections
 	listener net.Listener
 
@@ -98,28 +95,38 @@ func (res *CustomLocalTCPMailboxes) handleConn(conn net.Conn) {
 	for {
 		var value tla.Value
 
-		err := decoder.Decode(&value)
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("Connection closed by peer: %s", conn.RemoteAddr())
-			} else if strings.Contains(err.Error(), "use of closed network connection") {
-				log.Printf("Connection closed by us for %s", conn.RemoteAddr())
-			} else {
-				log.Printf("Error decoding message from %s: %v", conn.RemoteAddr(), err)
-			}
-			return
-		}
-
-		// Log the received message
-		log.Printf("Received message from %s: %v", conn.RemoteAddr(), value)
-
-		// Send the received value into the channel
 		select {
-		case res.messageChan <- value:
-			log.Printf("Message sent to messageChan")
 		case <-res.done:
 			log.Printf("Received done signal, stopping handleConn for %s", conn.RemoteAddr())
 			return
+		default:
+			// Attempt to decode a message without blocking
+			err := decoder.Decode(&value)
+			if err != nil {
+				if err == io.EOF {
+					log.Printf("Connection closed by peer: %s", conn.RemoteAddr())
+				} else if strings.Contains(err.Error(), "use of closed network connection") {
+					log.Printf("Connection closed by us for %s", conn.RemoteAddr())
+				} else {
+					log.Printf("Error decoding message from %s: %v", conn.RemoteAddr(), err)
+				}
+				return
+			}
+
+			// Log the received message
+			log.Printf("Received message from %s: %v", conn.RemoteAddr(), value)
+
+			// Send the received value into the channel, non-blocking
+			select {
+			case res.messageChan <- value:
+				log.Printf("Message sent to messageChan")
+			case <-res.done:
+				log.Printf("Received done signal, stopping handleConn for %s", conn.RemoteAddr())
+				return
+			default:
+				// Do nothing if unable to send to messageChan immediately
+				log.Printf("MessageChan is full, message from %s dropped", conn.RemoteAddr())
+			}
 		}
 	}
 }
@@ -136,7 +143,7 @@ func (res *CustomLocalTCPMailboxes) GetMessage() (tla.Value, error) {
 		log.Printf("Message retrieved from channel: %v", message)
 		return message, nil
 	case <-res.done:
-		return tla.Value{}, fmt.Errorf("mailbox closed")
+		return tla.Value{}, distsys.ErrDone
 	}
 }
 
@@ -154,7 +161,6 @@ func (res *CustomLocalTCPMailboxes) Commit() chan struct{} {
 
 func (res *CustomLocalTCPMailboxes) ReadValue() (tla.Value, error) {
 	panic("Panic!?")
-	return tla.Value{}, fmt.Errorf("ReadValue is not supported in CustomTCPMailboxes")
 }
 
 func (res *CustomLocalTCPMailboxes) WriteValue(value tla.Value) error {
@@ -263,7 +269,6 @@ func (res *CustomRemoteTCPMailboxes) Commit() chan struct{} {
 
 func (res *CustomRemoteTCPMailboxes) ReadValue() (tla.Value, error) {
 	panic("Panic!?")
-	return tla.Value{}, fmt.Errorf("ReadValue is not supported in CustomTCPMailboxes")
 }
 
 func (res *CustomRemoteTCPMailboxes) WriteValue(value tla.Value) error {
@@ -280,6 +285,7 @@ func (res *CustomRemoteTCPMailboxes) Close() error {
 type DummyChannel struct {
 	// Reference to a channel of type `chan interface{}`
 	channel chan tla.Value
+	closed  bool
 }
 
 // NewDummyChannel is the constructor that accepts a reference to an existing channel
@@ -316,6 +322,7 @@ func (res *DummyChannel) Commit() chan struct{} {
 }
 
 func (res *DummyChannel) Close() error {
+
 	close(res.channel)
 	return nil
 }

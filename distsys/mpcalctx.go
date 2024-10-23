@@ -516,7 +516,7 @@ func (ctx *MPCalContext) Run() (err error) {
 	// clean up all our resources and notify any interested parties that we have terminated.
 	defer func() {
 		// do clean-up, merging any errors into the error we return
-		err = multierr.Append(err, ctx.cleanupResources())
+		// err = multierr.Append(err, ctx.cleanupResources())
 		// report the error to the tracer before dying, since this might be more useful than a truncated trace
 		if err != nil {
 			ctx.eventState.CrashEvent(err)
@@ -618,6 +618,7 @@ func (ctx *MPCalContext) Stop() {
 			// case 2b: the archetype is not running, and is already flagged not to run. nothing to do here.
 		}
 	}()
+	ctx.cleanupResources() // TODO: err = and log if err
 	<-ctx.awaitExit
 }
 

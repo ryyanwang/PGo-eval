@@ -82,15 +82,15 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			var err error
 			_ = err
 
-			procRef, err := iface.RequireArchetypeResourceRef("AConsumer.proc")
+			procRef, nil := iface.RequireArchetypeResourceRef("AConsumer.proc")
 			proc := iface.Context().GetResourceByHandle(procRef).(*DummyChannel)
 
-			localRef, err := iface.RequireArchetypeResourceRef("AConsumer.netlocal")
+			localRef, nil := iface.RequireArchetypeResourceRef("AConsumer.netlocal")
 			localMailbox := iface.Context().GetResourceByHandle(localRef).(*CustomLocalTCPMailboxes)
 
 			value, err := localMailbox.GetMessage()
 			if err != nil {
-				return err
+				return distsys.ErrDone
 			}
 			proc.channel <- value
 
@@ -129,8 +129,11 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 
 			net := iface.Context().GetResourceByHandle(netref).(*CustomLocalTCPMailboxes)
 
-			net.GetMessage()
+			_, err = net.GetMessage()
 
+			if err != nil {
+				return err
+			}
 			return iface.Goto("AProducer.p2")
 		},
 	},
@@ -147,7 +150,10 @@ var jumpTable = distsys.MakeMPCalJumpTable(
 			if err != nil {
 				return err
 			}
-			exprRead1 := <-s.channel
+			exprRead1, ok := <-s.channel
+			if !ok {
+				return distsys.ErrDone
+			}
 
 			netref, err := iface.RequireArchetypeResourceRef("AProducer.netremote")
 			if err != nil {

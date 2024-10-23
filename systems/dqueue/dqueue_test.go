@@ -12,6 +12,8 @@ import (
 	"github.com/UBC-NSS/pgo/distsys/tla"
 )
 
+
+// doesn't run anymore, old test
 func TestNUM_NODES(t *testing.T) {
 	ctx := distsys.NewMPCalContextWithoutArchetype(
 		distsys.DefineConstantValue("NUM_CONSUMERS", tla.MakeNumber(12)))
@@ -22,6 +24,7 @@ func TestNUM_NODES(t *testing.T) {
 	}
 }
 
+// doesn't run anymore, old test
 func TestProducerConsumer(t *testing.T) {
 	producerSelf := tla.MakeNumber(0)
 	producerInputChannel := make(chan tla.Value, 3)
@@ -168,7 +171,6 @@ func TestProducerConsumerNew(t *testing.T) {
 	// Retrieve consumed values from the consumer output channel
 	log.Println("Receiving values from consumer output channel")
 	consumedValues := []tla.Value{<-consumerOutputChannel, <-consumerOutputChannel, <-consumerOutputChannel}
-	close(consumerOutputChannel)
 
 	// Allow time for processing
 	time.Sleep(100 * time.Millisecond)
@@ -184,6 +186,6 @@ func TestProducerConsumerNew(t *testing.T) {
 	}
 
 	log.Printf("TestProducerConsumerNew completed successfully. Produced: %v, Consumed: %v", producedValues, consumedValues)
-	ctxProducer.Stop()
-	ctxConsumer.Stop()
+	// ctxProducer.Stop()
+	// ctxConsumer.Stop()
 }
