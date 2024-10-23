@@ -12,7 +12,6 @@ import (
 	"github.com/UBC-NSS/pgo/distsys/tla"
 )
 
-
 // doesn't run anymore, old test
 func TestNUM_NODES(t *testing.T) {
 	ctx := distsys.NewMPCalContextWithoutArchetype(
@@ -186,6 +185,6 @@ func TestProducerConsumerNew(t *testing.T) {
 	}
 
 	log.Printf("TestProducerConsumerNew completed successfully. Produced: %v, Consumed: %v", producedValues, consumedValues)
-	// ctxProducer.Stop()
-	// ctxConsumer.Stop()
+	ctxProducer.Stop()
+	ctxConsumer.Stop()
 }

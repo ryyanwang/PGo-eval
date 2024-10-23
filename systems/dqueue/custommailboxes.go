@@ -292,6 +292,7 @@ type DummyChannel struct {
 func NewDummyChannel(ch chan tla.Value) distsys.ArchetypeResource {
 	return &DummyChannel{
 		channel: ch,
+		closed:  false,
 	}
 }
 
@@ -322,8 +323,10 @@ func (res *DummyChannel) Commit() chan struct{} {
 }
 
 func (res *DummyChannel) Close() error {
-
-	close(res.channel)
+	if !res.closed {
+		res.closed = true
+		close(res.channel)
+	}
 	return nil
 }
 func (res *DummyChannel) Index(value tla.Value) (distsys.ArchetypeResource, error) {
