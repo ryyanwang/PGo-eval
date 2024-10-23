@@ -27,7 +27,7 @@ type CustomLocalTCPMailboxes struct {
 
 	// Listener for incoming connections
 	listener net.Listener
-
+	closed   bool
 	// Channel to signal closure
 	done chan struct{}
 
@@ -47,6 +47,7 @@ func CustomNewLocalTCPMailboxes(listenAddr string) *CustomLocalTCPMailboxes {
 		messageChan: make(chan tla.Value, 100),
 		connections: make(map[int32]net.Conn),
 		addresses:   make(map[int32]string),
+		closed:      false,
 	}
 	// Start listening for incoming connections
 	go res.listen()
@@ -171,16 +172,19 @@ func (res *CustomLocalTCPMailboxes) WriteValue(value tla.Value) error {
 func (res *CustomLocalTCPMailboxes) Close() error {
 	log.Printf("Closing TCP mailboxes on %s", res.listenAddr)
 	// First, close res.done to signal goroutines to exit
-	close(res.done)
-	// Then, close the listener
-	err := res.listener.Close()
-	if err != nil {
-		log.Printf("Error closing listener: %v", err)
-		return err
+	if !res.closed {
+		close(res.done)
+		// Then, close the listener
+		err := res.listener.Close()
+		if err != nil {
+			log.Printf("Error closing listener: %v", err)
+			return err
+		}
+		// Close the message channel after all goroutines have exited
+		close(res.messageChan)
+		log.Printf("CustomLocalTCPMailboxes closed")
+		res.closed = true
 	}
-	// Close the message channel after all goroutines have exited
-	close(res.messageChan)
-	log.Printf("CustomLocalTCPMailboxes closed")
 	return nil
 }
 
@@ -193,6 +197,7 @@ type CustomRemoteTCPMailboxes struct {
 	// TCP connection to the remote server
 	connection net.Conn
 
+	closed bool
 	// Channel to signal closure
 	done chan struct{}
 }
@@ -203,6 +208,7 @@ func CustomNewRemoteTCPMailboxes(remoteAddress string) *CustomRemoteTCPMailboxes
 	res := &CustomRemoteTCPMailboxes{
 		remoteAddress: remoteAddress,
 		done:          make(chan struct{}),
+		closed:        false,
 	}
 	return res
 }
@@ -275,10 +281,13 @@ func (res *CustomRemoteTCPMailboxes) WriteValue(value tla.Value) error {
 	return fmt.Errorf("WriteValue is not supported in CustomTCPMailboxes")
 }
 func (res *CustomRemoteTCPMailboxes) Close() error {
-	log.Printf("Closing Remote TCP")
+	if !res.closed {
+		log.Printf("Closing Remote TCP")
 
-	res.CloseConn()
-	close(res.done)
+		res.CloseConn()
+		close(res.done)
+		res.closed = true
+	}
 	return nil
 }
 
@@ -323,10 +332,13 @@ func (res *DummyChannel) Commit() chan struct{} {
 }
 
 func (res *DummyChannel) Close() error {
+
 	if !res.closed {
 		res.closed = true
 		close(res.channel)
+		res.closed = true
 	}
+
 	return nil
 }
 func (res *DummyChannel) Index(value tla.Value) (distsys.ArchetypeResource, error) {
